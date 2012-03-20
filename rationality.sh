@@ -1,4 +1,4 @@
 #!/bin/bash
-./rationality.py
+./rationality.py > /dev/null
 scp rationality.epub ikeran.org:ikeran.org/
 scp rationality.mobi ikeran.org:ikeran.org/

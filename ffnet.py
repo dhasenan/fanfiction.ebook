@@ -5,14 +5,16 @@ import urllib2
 import io
 import os
 import re
+import string
 import sys
 
 TARGET="http://www.fanfiction.net/s/%s/%s/"
 
 class FFNetMunger:
-    def __init__(self, story_id):
+    def __init__(self, story_id, marker):
         self.story_id = story_id
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
+        self.marker = marker
 
     def process(self):
         self.content, self.name = self.retrieve()
@@ -56,16 +58,23 @@ class FFNetMunger:
         kernel, a, b = kernel.rpartition(",")
         return "Chapter " + kernel # calibre needs 'chapter' to help its chapter detection
 
-    def download(self, id, chapter):
+    def download(self, chapter):
         print "retrieving chapter %s" % chapter
         # TODO this doesn't like non-ascii characters
-        return urllib2.urlopen(TARGET % (id, chapter)).read()
+        return urllib2.urlopen(TARGET % (self.story_id, chapter)).read()
+
+    def wrong_story(self, c):
+        if self.marker is None:
+            return False
+        a, b, kernel = c.partition("<title>")
+        kernel, a, b = kernel.partition("</title>")
+        return string.find(kernel, self.marker) == -1
 
     def retrieve(self):
         chapters = []
         titles = []
 
-        first = self.download(self.story_id, 1)
+        first = self.download(1)
         count = self.find_count(first)
         name = self.get_name(first)
         chapters.append(first)
@@ -73,7 +82,7 @@ class FFNetMunger:
 
         # grab the items:
         for i in range(2, count + 1):
-            chapters.append(self.download(self.story_id, i))
+            chapters.append(self.download(i))
             titles.append('')
 
 
@@ -81,8 +90,12 @@ class FFNetMunger:
         for i in range(len(chapters)):
             print "munging chapter %s" % (i + 1)
             c = chapters[i]
+            if self.wrong_story(c):
+                sys.stderr.write("chapter %d came from wrong fic" % i)
+                chapters[i] = self.download(i)
             chapters[i] = self.guts(c)
             titles[i] = self.title(c)
+            print titles[i]
 
         # jam it into one string, with appropriate header and footer:
         contents = StringIO()
@@ -131,7 +144,7 @@ class FFNetMunger:
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:
-        print "Usage: %s STORY_ID"
+        sys.stderr.write("Usage: %s STORY_ID")
         exit(1)
     munger = FFNetMunger(sys.argv[1])
     munger.process()
