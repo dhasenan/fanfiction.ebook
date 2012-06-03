@@ -2,6 +2,7 @@
 from pycurl import *
 from StringIO import StringIO
 import urllib2
+import datetime
 import io
 import os
 import re
@@ -38,7 +39,7 @@ class FFNetMunger:
 
 
     def guts(self, c):
-        kernel = re.split("<div[^>]*class=storytext\\b.*?>", c, 1)[1]
+        kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
         while True:
             kernel, n = self.div_re.subn('', kernel)
             if n == 0:
@@ -113,7 +114,13 @@ class FFNetMunger:
         return contents, name
 
     def write(self):
-        f = io.open(self.filename + ".html", "wb")
+        self.write_to(self.filename)
+        now = datetime.datetime.now()
+        date = now.strftime("%Y-%m-%d")
+        self.write_to("%s-%s" % (self.filename, date))
+
+    def write_to(self, filename):
+        f = io.open(filename + ".html", "wb")
         f.write(self.content.getvalue())
         f.flush()
         f.close()
