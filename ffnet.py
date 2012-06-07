@@ -16,6 +16,7 @@ class FFNetMunger:
         self.story_id = story_id
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.marker = marker
+        self.min_chapters = 0
 
     def process(self):
         self.content, self.name = self.retrieve()
@@ -26,7 +27,8 @@ class FFNetMunger:
 
     def find_count(self, c):
         count = 0
-        a, b, kernel = c.partition("SELECT title='chapter navigation'")
+        regex = re.compile("SELECT[^>]*title='chapter navigation'", re.I)
+        kernel = regex.split(c)[-1]
         kernel, a, b = kernel.partition("</select>")
         f = re.compile("option\\s*value=([0-9]*)")
         for match in f.finditer(kernel):
@@ -77,6 +79,8 @@ class FFNetMunger:
 
         first = self.download(1)
         count = self.find_count(first)
+        if count < self.min_chapters:
+            raise Exception('Expected at least %s chapters, only found %s' % (self.min_chapters, count))
         name = self.get_name(first)
         chapters.append(first)
         titles.append('')
