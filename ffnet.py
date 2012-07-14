@@ -27,10 +27,10 @@ class FFNetMunger:
 
     def find_count(self, c):
         count = 0
-        regex = re.compile("SELECT[^>]*title='chapter navigation'", re.I)
+        regex = re.compile("SELECT[^>]*title=['\"]chapter navigation['\"]", re.I)
         kernel = regex.split(c)[-1]
         kernel, a, b = kernel.partition("</select>")
-        f = re.compile("option\\s*value=([0-9]*)")
+        f = re.compile("option\\s*value=\"{0,1}([0-9]*)")
         for match in f.finditer(kernel):
             g, = match.groups(1)
             current = int(g)
