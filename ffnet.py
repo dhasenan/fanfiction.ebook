@@ -17,6 +17,9 @@ class FFNetMunger:
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.marker = marker
         self.min_chapters = 0
+        self.filename = None
+        self.author = None
+        self.cover = None
 
     def process(self):
         self.content, self.name = self.retrieve()
@@ -124,6 +127,7 @@ class FFNetMunger:
         self.write_to("%s-%s" % (self.filename, date))
 
     def write_to(self, filename):
+        print 'writing story to %s.html' % filename
         f = io.open(filename + ".html", "wb")
         f.write(self.content.getvalue())
         f.flush()
@@ -157,5 +161,5 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         sys.stderr.write("Usage: %s STORY_ID")
         exit(1)
-    munger = FFNetMunger(sys.argv[1])
+    munger = FFNetMunger(sys.argv[1], None)
     munger.process()
