@@ -31,14 +31,17 @@ class FFNetMunger:
     def find_count(self, c):
         count = 0
         regex = re.compile("SELECT[^>]*title=['\"]chapter navigation['\"]", re.I)
-        kernel = regex.split(c)[-1]
-        kernel, a, b = kernel.partition("</select>")
-        f = re.compile("option\\s*value=\"{0,1}([0-9]*)")
-        for match in f.finditer(kernel):
-            g, = match.groups(1)
-            current = int(g)
-            if count < current:
-                count = current
+        if len(regex.split(c)) == 1:
+            count = 1
+        else:
+            kernel = regex.split(c)[-1]
+            kernel, a, b = kernel.partition("</select>")
+            f = re.compile("option\\s*value=\"{0,1}([0-9]*)")
+            for match in f.finditer(kernel):
+                g, = match.groups(1)
+                current = int(g)
+                if count < current:
+                    count = current
         print "total of %s chapters" % count
         return count
 
@@ -52,9 +55,14 @@ class FFNetMunger:
         kernel, a, b = kernel.partition("</div>")
         return kernel
 
-    def get_name(self, chapter):
+    def get_name(self, chapter, count):
         a, b, kernel = chapter.partition("<title>")
-        kernel, a, b = kernel.partition("Chapter")
+        if count > 1:
+            kernel, a, b = kernel.partition("Chapter")
+        else:
+            kernel, a, b = kernel.partition("</title>")
+            kernel, a, b = kernel.rpartition("| FanFiction")
+            kernel, a, b = kernel.rpartition(", a ")
         return kernel.strip()
 
     def title(self, c):
@@ -84,7 +92,7 @@ class FFNetMunger:
         count = self.find_count(first)
         if count < self.min_chapters:
             raise Exception('Expected at least %s chapters, only found %s' % (self.min_chapters, count))
-        name = self.get_name(first)
+        name = self.get_name(first, count)
         chapters.append(first)
         titles.append('')
 
