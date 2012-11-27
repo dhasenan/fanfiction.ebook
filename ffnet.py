@@ -110,13 +110,9 @@ class FFNetMunger:
         count = self.find_count(first)
         if count < self.min_chapters:
             raise Exception('Expected at least %s chapters, only found %s' % (self.min_chapters, count))
-<<<<<<< HEAD
         name = self.get_name(first, count)
-=======
-        name = self.get_name(first)
         if not self.author:
             self.author = self.get_author(first)
->>>>>>> author detection; output control flags; multiple stories per invocation
         chapters.append(first)
         titles.append('')
 
