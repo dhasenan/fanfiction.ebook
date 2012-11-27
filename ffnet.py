@@ -1,21 +1,32 @@
 #!/usr/bin/env python
-from pycurl import *
 from StringIO import StringIO
-import urllib2
+from pycurl import *
+import argparse
 import datetime
 import io
 import os
 import re
 import string
 import sys
+import urllib2
 
 TARGET="http://www.fanfiction.net/s/%s/%s/"
+URLFORMAT="fanfiction\.net/s/([0-9]+)(?:$|/.*)"
 
 class FFNetMunger:
-    def __init__(self, story_id, marker):
-        self.story_id = story_id
-        self.div_re = re.compile('<div.*?</div>', re.DOTALL)
+    def __init__(self, story_id, marker=None, formats=["epub", "mobi"], clean=False):
+        try:
+            self.story_id = int(story_id)
+        except:
+            match = re.search(URLFORMAT, story_id)
+            if match:
+                self.story_id = int(match.group(1))
+            else:
+                raise ValueError("story id should be either a URL or a story id")
         self.marker = marker
+        self.clean_html = clean
+        self.formats = formats
+        self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.min_chapters = 0
         self.filename = None
         self.author = None
@@ -27,6 +38,7 @@ class FFNetMunger:
             self.filename = self.name
         self.write()
         self.convert()
+        self.clean()
 
     def find_count(self, c):
         count = 0
@@ -54,6 +66,12 @@ class FFNetMunger:
                 break
         kernel, a, b = kernel.partition("</div>")
         return kernel
+
+    def get_author(self, chapter):
+        a, b, kernel = chapter.partition("<a href='/u")
+        kernel, a, b = kernel.partition("</a>")
+        a, b, kernel = kernel.partition(">")
+        return kernel.strip()
 
     def get_name(self, chapter, count):
         a, b, kernel = chapter.partition("<title>")
@@ -92,7 +110,13 @@ class FFNetMunger:
         count = self.find_count(first)
         if count < self.min_chapters:
             raise Exception('Expected at least %s chapters, only found %s' % (self.min_chapters, count))
+<<<<<<< HEAD
         name = self.get_name(first, count)
+=======
+        name = self.get_name(first)
+        if not self.author:
+            self.author = self.get_author(first)
+>>>>>>> author detection; output control flags; multiple stories per invocation
         chapters.append(first)
         titles.append('')
 
@@ -132,7 +156,11 @@ class FFNetMunger:
         self.write_to(self.filename)
         now = datetime.datetime.now()
         date = now.strftime("%Y-%m-%d")
-        self.write_to("%s-%s" % (self.filename, date))
+        if not self.clean:
+            self.write_to("%s-%s" % (self.filename, date))
+
+    def clean(self):
+        os.remove("%s.html" % self.filename)
 
     def write_to(self, filename):
         print 'writing story to %s.html' % filename
@@ -153,21 +181,34 @@ class FFNetMunger:
 
     def convert(self):
         # Prioritize low resource usage over speediness
-        pid1 = os.fork()
-        if pid1 == 0:
-            os.execvp("ebook-convert", self.args(".epub"))
-            return
-        os.waitpid(pid1, 0)
-
-        pid2 = os.fork()
-        if pid2 == 0:
-            os.execvp("ebook-convert", self.args(".mobi"))
-            return
-        os.waitpid(pid2, 0)
+        for format in self.formats:
+            pid = os.fork()
+            if pid == 0:
+                os.execvp("ebook-convert", self.args(".%s" % format))
+                return
+            os.waitpid(pid, 0)
 
 if __name__ == "__main__":
-    if len(sys.argv) == 1:
-        sys.stderr.write("Usage: %s STORY_ID")
+    parser = argparse.ArgumentParser(description="Convert fanfiction.net stories to ebooks")
+    parser.add_argument("stories", help="links or story ids for stories to convert", nargs="+",
+            type=str, metavar="story")
+    parser.add_argument("--epub", "-e", dest="epub", action="store_true", help="produce epub (nook) output only")
+    parser.add_argument("--mobi", "-m", dest="mobi", action="store_true", help="produce mobi (kindle) output only")
+    parser.add_argument("--formats", "-f", dest="formats", nargs=1, help="comma-separated list of formats (eg epub, mobi)")
+    parser.add_argument("--clean", "-c", dest="clean", action="store_true", help="remove intermediate files")
+    args = parser.parse_args()
+    formats = ["mobi", "epub"]
+    if args.formats:
+        formats = args.formats.split(",")
+    if args.epub:
+        formats = ["epub"]
+    if args.mobi:
+        formats = ["mobi"]
+    if args.epub and args.mobi:
+        formats = ["mobi", "epub"]
+    if not args.stories:
+        sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
-    munger = FFNetMunger(sys.argv[1], None)
-    munger.process()
+    for story in args.stories:
+        munger = FFNetMunger(story, formats=formats, clean=args.clean)
+        munger.process()
