@@ -14,7 +14,7 @@ TARGET="http://www.fanfiction.net/s/%s/%s/"
 URLFORMAT="fanfiction\.net/s/([0-9]+)(?:$|/.*)"
 
 class FFNetMunger:
-    def __init__(self, story_id, marker=None, formats=["epub", "mobi"], clean=False):
+    def __init__(self, story_id, marker=None, formats=["epub", "mobi"], clean=False, mote_it_not=True):
         try:
             self.story_id = int(story_id)
         except:
@@ -26,6 +26,7 @@ class FFNetMunger:
         self.marker = marker
         self.clean_html = clean
         self.formats = formats
+        self.mote_it_not = mote_it_not
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.min_chapters = 0
         self.filename = None
@@ -65,7 +66,14 @@ class FFNetMunger:
             if n == 0:
                 break
         kernel, a, b = kernel.partition("</div>")
-        return kernel
+        if self.mote_it_not:
+            return (kernel
+                    .replace('o mote it be', 'o be it')
+                    .replace('o Mote It Be', 'o Be It')
+                    .replace('O MOTE IT BE', 'O BE IT')
+                    )
+        else:
+            return kernel
 
     def get_author(self, chapter):
         a, b, kernel = chapter.partition("<a href='/u")
@@ -156,7 +164,8 @@ class FFNetMunger:
             self.write_to("%s-%s" % (self.filename, date))
 
     def clean(self):
-        os.remove("%s.html" % self.filename)
+        if self.clean_html:
+            os.remove("%s.html" % self.filename)
 
     def write_to(self, filename):
         print 'writing story to %s.html' % filename
@@ -192,6 +201,7 @@ if __name__ == "__main__":
     parser.add_argument("--mobi", "-m", dest="mobi", action="store_true", help="produce mobi (kindle) output only")
     parser.add_argument("--formats", "-f", dest="formats", nargs=1, help="comma-separated list of formats (eg epub, mobi)")
     parser.add_argument("--clean", "-c", dest="clean", action="store_true", help="remove intermediate files")
+    parser.add_argument("--somoteitbe", "-s", dest="somoteitbe", action="store_true", help="allow an egregiously overused and terrible phrase to be used")
     args = parser.parse_args()
     formats = ["mobi", "epub"]
     if args.formats:
@@ -206,5 +216,5 @@ if __name__ == "__main__":
         sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
     for story in args.stories:
-        munger = FFNetMunger(story, formats=formats, clean=args.clean)
+        munger = FFNetMunger(story, formats=formats, clean=args.clean, mote_it_not=not args.somoteitbe)
         munger.process()
