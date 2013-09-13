@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 from StringIO import StringIO
-from pycurl import *
 import argparse
 import datetime
 import io
 import os
+import pycurl
 import re
 import string
 import sys
-import urllib2
 
 TARGET="http://www.fanfiction.net/s/%s/%s/"
 URLFORMAT="fanfiction\.net/s/([0-9]+)(?:$|/.*)"
@@ -101,7 +100,16 @@ class FFNetMunger:
     def download(self, chapter):
         print "retrieving chapter %s" % chapter
         # TODO this doesn't like non-ascii characters
-        return urllib2.urlopen(TARGET % (self.story_id, chapter)).read()
+        buf = StringIO()
+        c = pycurl.Curl()
+        c.setopt(pycurl.USERAGENT,
+                'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
+        c.setopt(pycurl.URL, TARGET % (self.story_id, chapter))
+        c.setopt(pycurl.WRITEFUNCTION, buf.write)
+        c.perform()
+        content = buf.getvalue()
+        buf.close()
+        return content
 
     def wrong_story(self, c):
         if self.marker is None:
@@ -206,12 +214,12 @@ if __name__ == "__main__":
     formats = ["mobi", "epub"]
     if args.formats:
         formats = args.formats.split(",")
-    if args.epub:
+    elif args.epub and args.mobi:
+        pass  # default
+    elif args.epub:
         formats = ["epub"]
-    if args.mobi:
+    elif args.mobi:
         formats = ["mobi"]
-    if args.epub and args.mobi:
-        formats = ["mobi", "epub"]
     if not args.stories:
         sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
