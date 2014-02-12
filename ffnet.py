@@ -59,20 +59,20 @@ class FFNetMunger:
 
 
     def guts(self, c):
-        kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
-        while True:
-            kernel, n = self.div_re.subn('', kernel)
-            if n == 0:
-                break
-        kernel, a, b = kernel.partition("</div>")
-        if self.mote_it_not:
-            return (kernel
-                    .replace('o mote it be', 'o be it')
-                    .replace('o Mote It Be', 'o Be It')
-                    .replace('O MOTE IT BE', 'O BE IT')
-                    )
-        else:
-            return kernel
+		kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
+		while True:
+			kernel, n = self.div_re.subn('', kernel)
+			if n == 0:
+				break
+		kernel, a, b = kernel.partition("</div>")
+		if self.mote_it_not:
+			return (kernel
+					.replace('o mote it be', 'o be it')
+					.replace('o Mote It Be', 'o Be It')
+					.replace('O MOTE IT BE', 'O BE IT')
+					)
+		else:
+			return kernel
 
     def get_author(self, chapter):
         a, b, kernel = chapter.partition("<a href='/u")
@@ -102,6 +102,7 @@ class FFNetMunger:
         # TODO this doesn't like non-ascii characters
         buf = StringIO()
         c = pycurl.Curl()
+        c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.setopt(pycurl.USERAGENT,
                 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
         c.setopt(pycurl.URL, TARGET % (self.story_id, chapter))
