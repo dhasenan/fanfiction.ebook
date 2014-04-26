@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-from StringIO import StringIO
+# coding=utf-8
+
 import argparse
 import datetime
 import io
@@ -9,11 +10,91 @@ import re
 import string
 import sys
 
+from BeautifulSoup import BeautifulSoup
+from StringIO import StringIO
+
 TARGET="http://www.fanfiction.net/s/%s/%s/"
 URLFORMAT="fanfiction\.net/s/([0-9]+)(?:$|/.*)"
 
+
+class ParagraphCleaner:
+    def clean(self, p):
+        # Recurse through, changing quotes. Look for blockquote indicators (centered + italics).
+        self.last_quote = None
+        self.quote_count = 0
+        self.is_blockquote = False
+        self.search_through(p)
+
+    def search_through(self, node):
+        try:
+            kids = node.contents
+        except AttributeError:
+            kids = []
+        if kids:
+            for kid in kids:
+                self.search_through(kid)
+        elif node.string:
+            # String node.
+            # I can replace [non-letter]'[letter] with \1&lsquo;\2 and [letter]' with &lsquo;\1.
+            # Mostly.
+            # People can nest quotes in terrible arbitrary ways.
+            # But '[letter] is always a left quote and [letter]' is always a right quote.
+            # And [letter]'[letter] is always an apostrophe, which should be rendered as a right quote
+            s = ''
+            orig = node.string              \
+                .replace(u'--', u'&mdash;')   \
+                .replace(u'...', u'&hellip;') \
+                .replace(u'â€”', u'&mdash;')
+            for i in range(len(orig)):
+                c = orig[i]
+                if c == '\'':
+                    s += self.requote(orig, i, '&lsquo;', '&rsquo;')
+                elif c == '"':
+                    s += self.requote(orig, i, '&ldquo;', '&rdquo;')
+                else:
+                    s += c
+            node.replaceWith(s)
+
+    def requote(self, orig, i, lquo, rquo):
+        sign = orig[i]
+        other = '"' if sign == '\'' else '\''
+        # Apostrophe or quote.
+        left_letter = i > 0 and orig[i - 1] in string.ascii_letters
+        right_letter = i < len(orig) - 1 and orig[i + 1] in string.ascii_letters
+        if left_letter and right_letter:
+            # Apostrophe! (Or terrible formatting.)
+            return rquo
+        # Quote or dropped letters.
+        # The punctuation list isn't exhaustive; we're doing best effort here.
+        if left_letter or (i > 0 and orig[i - 1] in ',.!?;-:'):
+            if self.last_quote == sign:
+                self.quote_count -= 1
+                self.last_quote = other
+            return rquo
+        if right_letter:
+            self.last_quote = sign
+            self.quote_count += 1
+            return lquo
+        if self.last_quote == sign:
+            self.quote_count -= 1
+            if self.quote_count > 0:
+                self.last_quote = other
+            return rquo
+        else:
+            self.last_quote = sign
+            self.quote_count += 1
+            return lquo
+
+
 class FFNetMunger:
-    def __init__(self, story_id, marker=None, formats=["epub", "mobi"], clean=False, mote_it_not=True):
+    def __init__(
+            self,
+            story_id,
+            marker=None,
+            formats=["epub", "mobi"],
+            clean=False,
+            mote_it_not=True,
+            pretty=True):
         try:
             self.story_id = int(story_id)
         except:
@@ -26,6 +107,8 @@ class FFNetMunger:
         self.clean_html = clean
         self.formats = formats
         self.mote_it_not = mote_it_not
+        self.pretty = pretty
+
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.min_chapters = 0
         self.filename = None
@@ -59,23 +142,23 @@ class FFNetMunger:
 
 
     def guts(self, c):
-		kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
-		while True:
-			kernel, n = self.div_re.subn('', kernel)
-			if n == 0:
-				break
-		kernel, a, b = kernel.partition("</div>")
-		if self.mote_it_not:
-			return (kernel
-					.replace('o mote it be', 'o be it')
-					.replace('o Mote It Be', 'o Be It')
-					.replace('O MOTE IT BE', 'O BE IT')
-					)
-		else:
-			return kernel
+        kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
+        while True:
+            kernel, n = self.div_re.subn('', kernel)
+            if n == 0:
+                break
+        kernel, a, b = kernel.partition("</div>")
+        if self.mote_it_not:
+            return (kernel
+                    .replace('o mote it be', 'o be it')
+                    .replace('o Mote It Be', 'o Be It')
+                    .replace('O MOTE IT BE', 'O BE IT')
+                    )
+        else:
+            return kernel
 
     def get_author(self, chapter):
-        a, b, kernel = chapter.partition("<a href='/u")
+        a, b, kernel = chapter.partition(" href='/u")
         kernel, a, b = kernel.partition("</a>")
         a, b, kernel = kernel.partition(">")
         return kernel.strip()
@@ -102,11 +185,11 @@ class FFNetMunger:
         # TODO this doesn't like non-ascii characters
         buf = StringIO()
         c = pycurl.Curl()
-        c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.setopt(pycurl.USERAGENT,
                 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
         c.setopt(pycurl.URL, TARGET % (self.story_id, chapter))
         c.setopt(pycurl.WRITEFUNCTION, buf.write)
+        c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.perform()
         content = buf.getvalue()
         buf.close()
@@ -146,7 +229,7 @@ class FFNetMunger:
             if self.wrong_story(c):
                 sys.stderr.write("chapter %d came from wrong fic" % i)
                 chapters[i] = self.download(i)
-            chapters[i] = self.guts(c)
+            chapters[i] = self.clean_chapter(self.guts(c))
             titles[i] = self.title(c)
             print titles[i]
 
@@ -164,6 +247,18 @@ class FFNetMunger:
         contents.write("</body></html>")
 
         return contents, name
+
+    def clean_chapter(self, chapter_contents):
+      if not self.pretty:
+        return chapter_contents
+      soup = BeautifulSoup(chapter_contents)
+      for p in soup.findAll('p'):
+        self.clean_paragraph(p)
+      s = soup.renderContents()
+      return s
+
+    def clean_paragraph(self, p):
+        ParagraphCleaner().clean(p)
 
     def write(self):
         self.write_to(self.filename)
@@ -202,15 +297,22 @@ class FFNetMunger:
                 return
             os.waitpid(pid, 0)
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Convert fanfiction.net stories to ebooks")
     parser.add_argument("stories", help="links or story ids for stories to convert", nargs="+",
             type=str, metavar="story")
-    parser.add_argument("--epub", "-e", dest="epub", action="store_true", help="produce epub (nook) output only")
-    parser.add_argument("--mobi", "-m", dest="mobi", action="store_true", help="produce mobi (kindle) output only")
-    parser.add_argument("--formats", "-f", dest="formats", nargs=1, help="comma-separated list of formats (eg epub, mobi)")
-    parser.add_argument("--clean", "-c", dest="clean", action="store_true", help="remove intermediate files")
-    parser.add_argument("--somoteitbe", "-s", dest="somoteitbe", action="store_true", help="allow an egregiously overused and terrible phrase to be used")
+    parser.add_argument("--epub", "-e", dest="epub", action="store_true",
+            help="produce epub (nook) output only")
+    parser.add_argument("--mobi", "-m", dest="mobi", action="store_true",
+            help="produce mobi (kindle) output only")
+    parser.add_argument("--formats", "-f", dest="formats", nargs=1,
+            help="comma-separated list of formats (eg epub, mobi)")
+    parser.add_argument("--clean", "-c", dest="clean", action="store_true",
+            help="remove intermediate files")
+    parser.add_argument("--raw", "-r", dest="raw", action="store_true",
+            help="don't prettify text (curly quotes, nicer blockquotes, etc as in original)")
+    parser.add_argument("--somoteitbe", "-s", dest="somoteitbe", action="store_true",
+            help="allow an egregiously overused and terrible phrase to be used")
     args = parser.parse_args()
     formats = ["mobi", "epub"]
     if args.formats:
@@ -225,5 +327,13 @@ if __name__ == "__main__":
         sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
     for story in args.stories:
-        munger = FFNetMunger(story, formats=formats, clean=args.clean, mote_it_not=not args.somoteitbe)
+        munger = FFNetMunger(
+                story,
+                formats=formats,
+                clean=args.clean,
+                mote_it_not=not args.somoteitbe,
+                pretty=not args.raw)
         munger.process()
+
+if __name__ == "__main__":
+    main()
