@@ -2,6 +2,7 @@
 # coding=utf-8
 
 import argparse
+import codecs
 import datetime
 import io
 import os
@@ -183,7 +184,7 @@ class FFNetMunger:
     def download(self, chapter):
         print "retrieving chapter %s" % chapter
         # TODO this doesn't like non-ascii characters
-        buf = StringIO()
+        buf = io.BytesIO()
         c = pycurl.Curl()
         c.setopt(pycurl.USERAGENT,
                 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
@@ -191,9 +192,9 @@ class FFNetMunger:
         c.setopt(pycurl.WRITEFUNCTION, buf.write)
         c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.perform()
-        content = buf.getvalue()
+        raw_content = buf.getvalue()
         buf.close()
-        return content
+        return codecs.decode(raw_content, 'utf8')
 
     def wrong_story(self, c):
         if self.marker is None:
@@ -235,16 +236,17 @@ class FFNetMunger:
 
         # jam it into one string, with appropriate header and footer:
         contents = StringIO()
-        contents.write("""<html>
+        contents.write(u"""<html>
         <head>
             <title>%s</title>
         </head>
         <body>
     """ % name)
         for i in range(len(chapters)):
-            contents.write("<h1>" + titles[i] + "</h1>\n<div>" + chapters[i] + "</div>\n")
+            contents.write(
+                u"<h1 class='chapter'>%s</h1>\n<div>%s</div>\n" % (titles[i], chapters[i]))
 
-        contents.write("</body></html>")
+        contents.write(u"</body></html>")
 
         return contents, name
 
@@ -254,7 +256,7 @@ class FFNetMunger:
       soup = BeautifulSoup(chapter_contents)
       for p in soup.findAll('p'):
         self.clean_paragraph(p)
-      s = soup.renderContents()
+      s = unicode(soup)
       return s
 
     def clean_paragraph(self, p):
@@ -274,7 +276,8 @@ class FFNetMunger:
     def write_to(self, filename):
         print 'writing story to %s.html' % filename
         f = io.open(filename + ".html", "wb")
-        f.write(self.content.getvalue())
+        c = self.content.getvalue()
+        f.write(codecs.encode(c, 'utf8'))
         f.flush()
         f.close()
 
