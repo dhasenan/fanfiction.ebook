@@ -14,26 +14,146 @@ import sys
 from BeautifulSoup import BeautifulSoup
 from StringIO import StringIO
 
-TARGET="http://www.fanfiction.net/s/%s/%s/"
-URLFORMAT="fanfiction\.net/s/([0-9]+)(?:$|/.*)"
+class PortkeyAdapter:
+    ReportRegex = re.compile('http.*portkey.*act=report.*')
+    AuthorProfileRegex = re.compile('/profile/.*')
+
+    def CanHandle(self, url):
+        return 'portkey.org/' in url
+
+    def StoryUrl(self, raw_url):
+        if not raw_url.endswith('/'):
+            return raw_url + '/'
+        return raw_url
+
+    def Title(self, first_page_soup):
+        # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
+        title = unicode(first_page_soup.find('title').contents[0])
+        title = title.replace('PORTKEY.ORG >> ', '')
+        title = title.replace('PORTKEY.ORG &gt;&gt;', '')
+        title = title[0:title.rfind(' - Chapter')]
+        return title.strip()
+
+    def Author(self, page_soup):
+        link = page_soup.find('a', href=PortkeyAdapter.AuthorProfileRegex)
+        return unicode(link.string)
+
+    def ChapterTitle(self, page_soup):
+        title = unicode(page_soup.find('title').contents[0])
+        title = title[title.rfind('- Chapter:'):]
+        title = title[len('- Chapter:'):]
+        title = 'Chapter' + title
+        return title
+
+    def ChapterContents(self, page_soup):
+        outer_tds = page_soup.findAll('td')
+        outer_td = None
+        for td in outer_tds:
+            for k, v in td.attrs:
+                if k == 'class' and v == 'story':
+                    outer_td = td
+                    break
+            if outer_td:
+                break
+        if not outer_td:
+            return None
+        # This contains a "report to admins" link and the show-ads javascript. We'll excise that.
+        map(lambda x: x.decompose(), outer_td.findAll('script'))
+        map(lambda x: x.decompose(), outer_td.findAll('noscript'))
+        map(lambda x: x.decompose(), outer_td.findAll('img'))
+        map(lambda x: x.decompose(), outer_td.findAll('a', href=PortkeyAdapter.ReportRegex))
+        return outer_td
+
+    def ChapterCount(self, page_soup):
+        select = self._FindChapterSelect(page_soup)
+        if select:
+            return len(select.findAll('option'))
+        return 1
+
+    def _FindChapterSelect(self, page_soup):
+        selects = page_soup.findAll('select')
+        for s in selects:
+            for k, v in s.attrs:
+                if k == 'class' and v == 'boxedsmall':
+                    return s
+
+    def ChapterUrl(self, story_url, chapter):
+        return story_url + unicode(chapter)
+
+    def Encoding(self):
+        return 'iso-8859-1'
+
+
+class FFNetAdapter:
+    UrlRegex = re.compile('fanfiction\.net/s/([0-9]+)(?:$|/.*)')
+    AuthorProfileRegex = re.compile('/u/.*')
+
+    def CanHandle(self, url):
+        return 'fanfiction.net/' in url
+
+    def StoryUrl(self, raw_url):
+        match = FFNetAdapter.UrlRegex.search(raw_url)
+        if match:
+            story_id = int(match.group(1))
+        else:
+            raise ValueError("story id should be either a URL or a story id")
+        return 'http://www.fanfiction.net/s/%s/' % story_id
+
+    def Title(self, page_soup):
+        # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
+        chapter_title = self.ChapterTitle(page_soup)
+        title = unicode(page_soup.find('title').contents[0])
+        title = title[0:title.rfind('|')].strip()
+        if chapter_title and title.contains(chapter_title):
+            title = title[0:title.rfind(chapter_title)]
+        else:
+            title = title[0:title.rfind(',')]
+        return title.strip()
+
+    def Author(self, page_soup):
+        top = page_soup.find('div', id='profile_top')
+        link = top.find('a', href=FFNetAdapter.AuthorProfileRegex)
+        return unicode(link.string)
+
+    def ChapterTitle(self, page_soup):
+        select = page_soup.find('select', id='chap_select')
+        if not select:
+            return ''
+        selected_option = select.select('option[selected]')
+        return 'Chapter ' + selected_option.string
+
+    def ChapterContents(self, page_soup):
+        return page_soup.find('div', id='storytext')
+
+    def ChapterCount(self, page_soup):
+        select = page_soup.find('select', id='chap_select')
+        if not select:
+            return 1
+        return len(select.findAll('option'))
+
+    def ChapterUrl(self, story_url, chapter):
+        return story_url + unicode(chapter)
+
+    def Encoding(self):
+        return 'utf8'
 
 
 class ParagraphCleaner:
-    def clean(self, p):
+    def Clean(self, p):
         # Recurse through, changing quotes. Look for blockquote indicators (centered + italics).
         self.last_quote = None
         self.quote_count = 0
         self.is_blockquote = False
-        self.search_through(p)
+        self.SearchThrough(p)
 
-    def search_through(self, node):
+    def SearchThrough(self, node):
         try:
             kids = node.contents
         except AttributeError:
             kids = []
         if kids:
             for kid in kids:
-                self.search_through(kid)
+                self.SearchThrough(kid)
         elif node.string:
             # String node.
             # I can replace [non-letter]'[letter] with \1&lsquo;\2 and [letter]' with &lsquo;\1.
@@ -49,14 +169,14 @@ class ParagraphCleaner:
             for i in range(len(orig)):
                 c = orig[i]
                 if c == '\'':
-                    s += self.requote(orig, i, '&lsquo;', '&rsquo;')
+                    s += self.Requote(orig, i, '&lsquo;', '&rsquo;')
                 elif c == '"':
-                    s += self.requote(orig, i, '&ldquo;', '&rdquo;')
+                    s += self.Requote(orig, i, '&ldquo;', '&rdquo;')
                 else:
                     s += c
             node.replaceWith(s)
 
-    def requote(self, orig, i, lquo, rquo):
+    def Requote(self, orig, i, lquo, rquo):
         sign = orig[i]
         other = '"' if sign == '\'' else '\''
         # Apostrophe or quote.
@@ -86,6 +206,150 @@ class ParagraphCleaner:
             self.quote_count += 1
             return lquo
 
+class Story:
+    def __init__(self, title, author, chapters):
+        self.title = title
+        if type(self.title) != unicode:
+            print('Unexpected title type %s' % type(self.title))
+        self.author = author
+        if type(self.author) != unicode:
+            print('Unexpected author type %s' % type(self.author))
+        self.chapters = chapters
+        self.cover = None
+
+    def Filename(self, ext):
+        if type(self.title) != unicode:
+            print('Unexpected title type %s' % type(self.title))
+        base = self.title.replace(':', '_').replace('?', '_')
+        if type(base) != unicode:
+            print('Unexpected title type %s' % type(base))
+        name = '%s.%s' % (self.title.replace(':', '_').replace('?', '_'), ext)
+        print name
+        return name
+
+    def ToHtml(self):
+        soup = BeautifulSoup('<html><head></head><body></body></html>')
+        soup.head.append(self.title)
+        for chapter in self.chapters:
+            soup.body.append(chapter.ToHtml(soup))
+        return soup
+
+class Chapter:
+    def __init__(self, title, contents):
+        """Initialize this chapter.
+        
+        Args:
+          title: The title of the chapter.
+          contents: The contents of the chapter as a BeautifulSoup object.
+        """
+        self.title = title
+        self.contents = contents
+
+    def ToHtml(self, soup):
+        chapter = BeautifulSoup('<div><h1 class="chapter"></h1></div>')
+        chapter.h1.append(self.title)
+        chapter.append(self.contents)
+        return chapter
+
+
+class Munger:
+    def __init__(
+            self,
+            story_url,
+            adapter,
+            formats=['epub', 'mobi'],
+            clean=False,
+            mote_it_not=True,
+            pretty=True,
+            afternote=None):
+        self.story_url = adapter.StoryUrl(story_url)
+        self.adapter = adapter
+        self.formats = formats
+        self.clean = clean
+        self.pretty = pretty
+        self.afternote = afternote
+        self.cover = None
+
+        self._cleaner = ParagraphCleaner()
+
+    def DownloadAndConvert(self):
+        story = self.DownloadStory()
+        self.CreateEbook(story)
+
+    def DownloadStory(self):
+        chapter1 = self.DownloadChapter(1)
+        title = self.adapter.Title(chapter1)
+        print title
+        author = self.adapter.Author(chapter1)
+        chapter_count = self.adapter.ChapterCount(chapter1)
+        chapters = [self.ToChapter(chapter1)]
+        for i in range(2, chapter_count + 1):
+            raw = self.DownloadChapter(i)
+            chapters.append(self.ToChapter(raw))
+        # TODO put this into rationality.py instead -- it can deal.
+        if self.afternote:
+            final = chapters[-1].contents
+            after = final.new_tag('div')
+            after.append(after.new_string(afternote))
+            final.append(after)
+        return Story(title, author, chapters)
+
+
+    def ToChapter(self, raw):
+        contents = self.adapter.ChapterContents(raw)
+        title = self.adapter.ChapterTitle(raw)
+        chapter = Chapter(title, contents)
+        self.CleanChapter(chapter)
+        return chapter
+
+
+    def CreateEbook(self, story):
+        html = story.ToHtml()
+        print 'writing story to %s.html' % story.Filename('html')
+        f = io.open(story.Filename('html'), 'wb')
+        f.write(codecs.encode(unicode(html), 'utf8'))
+        f.flush()
+        f.close()
+
+        for outtype in self.formats:
+            pid = os.fork()
+            if pid == 0:
+                os.execvp('ebook-convert', self._Args(story, outtype))
+                return
+            os.waitpid(pid, 0)
+
+    def _Args(self, story, outtype):
+        std_args = ['', story.Filename('html'), story.Filename(outtype)]
+
+        if story.author != None:
+            std_args += ['--authors', story.author]
+
+        if story.cover != None:
+            std_args += ['--cover', story.cover]
+        return std_args
+
+    def CleanChapter(self, chapter):
+        if not self.pretty:
+            return
+        for p in chapter.contents.findAll('p'):
+            self._cleaner.Clean(p)
+
+    def DownloadChapter(self, chapter):
+        print 'retrieving chapter %s' % chapter
+        url = self.adapter.ChapterUrl(self.story_url, chapter)
+        buf = io.BytesIO()
+        c = pycurl.Curl()
+        c.setopt(pycurl.USERAGENT,
+                'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
+        c.setopt(pycurl.URL, url)
+        c.setopt(pycurl.WRITEFUNCTION, buf.write)
+        c.setopt(pycurl.FOLLOWLOCATION, 1)
+        c.perform()
+        raw_content = buf.getvalue()
+        buf.close()
+        text = codecs.decode(raw_content, self.adapter.Encoding())
+        return BeautifulSoup(text)
+
 
 class FFNetMunger:
     def __init__(
@@ -95,7 +359,8 @@ class FFNetMunger:
             formats=["epub", "mobi"],
             clean=False,
             mote_it_not=True,
-            pretty=True):
+            pretty=True,
+            afternote=None):
         try:
             self.story_id = int(story_id)
         except:
@@ -109,6 +374,7 @@ class FFNetMunger:
         self.formats = formats
         self.mote_it_not = mote_it_not
         self.pretty = pretty
+        self.afternote = afternote
 
         self.div_re = re.compile('<div.*?</div>', re.DOTALL)
         self.min_chapters = 0
@@ -246,6 +512,10 @@ class FFNetMunger:
             contents.write(
                 u"<h1 class='chapter'>%s</h1>\n<div>%s</div>\n" % (titles[i], chapters[i]))
 
+        if self.afternote:
+            contents.write(u'<div>')
+            contents.write(unicode(self.afternote))
+            contents.write(u'</div>')
         contents.write(u"</body></html>")
 
         return contents, name
@@ -291,15 +561,6 @@ class FFNetMunger:
             std_args += ["--cover", self.cover]
         return std_args
 
-    def convert(self):
-        # Prioritize low resource usage over speediness
-        for format in self.formats:
-            pid = os.fork()
-            if pid == 0:
-                os.execvp("ebook-convert", self.args(".%s" % format))
-                return
-            os.waitpid(pid, 0)
-
 def main():
     parser = argparse.ArgumentParser(description="Convert fanfiction.net stories to ebooks")
     parser.add_argument("stories", help="links or story ids for stories to convert", nargs="+",
@@ -319,7 +580,7 @@ def main():
     args = parser.parse_args()
     formats = ["mobi", "epub"]
     if args.formats:
-        formats = args.formats.split(",")
+        formats = args.formats
     elif args.epub and args.mobi:
         pass  # default
     elif args.epub:
@@ -329,14 +590,20 @@ def main():
     if not args.stories:
         sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
+
+    adapters = [PortkeyAdapter(), FFNetAdapter()]
     for story in args.stories:
-        munger = FFNetMunger(
-                story,
-                formats=formats,
-                clean=args.clean,
-                mote_it_not=not args.somoteitbe,
-                pretty=not args.raw)
-        munger.process()
+        for adapter in adapters:
+            if not adapter.CanHandle(story):
+                continue
+            munger = Munger(
+                    story,
+                    adapter,
+                    formats=formats,
+                    clean=args.clean,
+                    mote_it_not=not args.somoteitbe,
+                    pretty=not args.raw)
+            munger.DownloadAndConvert()
 
 if __name__ == "__main__":
     main()

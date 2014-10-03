@@ -6,4 +6,5 @@ munger.filename = "rationality"
 munger.author = "Eliezer Yudkowsky"
 munger.cover = "methods_of_rationality_cover.jpg"
 munger.min_chapters = 85
+munger.afternote = u'Problems with the ebook? Contact dhasenan@gmail.com.'
 munger.process()
