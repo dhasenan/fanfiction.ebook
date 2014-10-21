@@ -81,7 +81,11 @@ class PortkeyAdapter:
         return story_url + unicode(chapter)
 
     def Encoding(self):
-        return 'iso-8859-1'
+        # The site doesn't explicitly say what encoding it uses. Some stories are detected as UTF-8
+        # and some as ISO-8859-1. My test case had encoding issues with the latter, despite firefox
+        # saying that that was the encoding it used, but windows-1252 worked.
+        # Portkey, fix your encodings! I don't care what you use as long as it's consistent.
+        return 'windows-1252'
 
 
 class FFNetAdapter:
@@ -104,7 +108,7 @@ class FFNetAdapter:
         chapter_title = self.ChapterTitle(page_soup)
         title = unicode(page_soup.find('title').contents[0])
         title = title[0:title.rfind('|')].strip()
-        if chapter_title and title.contains(chapter_title):
+        if chapter_title and chapter_title in title:
             title = title[0:title.rfind(chapter_title)]
         else:
             title = title[0:title.rfind(',')]
@@ -119,8 +123,11 @@ class FFNetAdapter:
         select = page_soup.find('select', id='chap_select')
         if not select:
             return ''
-        selected_option = select.select('option[selected]')
-        return 'Chapter ' + selected_option.string
+        for s in select.findAll('option'):
+            for k, v in s.attrs:
+                if k == 'selected':
+                    return 'Chapter ' + s.string
+        return 'Missing chapter title'
 
     def ChapterContents(self, page_soup):
         return page_soup.find('div', id='storytext')
@@ -306,8 +313,8 @@ class Munger:
     def CreateEbook(self, story):
         html = story.ToHtml()
         print 'writing story to %s.html' % story.Filename('html')
-        f = io.open(story.Filename('html'), 'wb')
-        f.write(codecs.encode(unicode(html), 'utf8'))
+        f = io.open(story.Filename('html'), 'w')
+        f.write(unicode(html))
         f.flush()
         f.close()
 
