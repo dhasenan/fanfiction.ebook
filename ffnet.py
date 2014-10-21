@@ -107,11 +107,12 @@ class FFNetAdapter:
         # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
         chapter_title = self.ChapterTitle(page_soup)
         title = unicode(page_soup.find('title').contents[0])
-        title = title[0:title.rfind('|')].strip()
         if chapter_title and chapter_title in title:
             title = title[0:title.rfind(chapter_title)]
         else:
             title = title[0:title.rfind(',')]
+            title = title[0:title.rfind('Chapter')]
+        title = title[0:title.rfind('|')].strip()
         return title.strip()
 
     def Author(self, page_soup):
@@ -126,7 +127,7 @@ class FFNetAdapter:
         for s in select.findAll('option'):
             for k, v in s.attrs:
                 if k == 'selected':
-                    return 'Chapter ' + s.string
+                    return u'Chapter ' + unicode(s.string)
         return 'Missing chapter title'
 
     def ChapterContents(self, page_soup):
