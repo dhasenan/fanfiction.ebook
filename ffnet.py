@@ -236,8 +236,8 @@ class Story:
         return name
 
     def ToHtml(self):
-        soup = BeautifulSoup('<html><head></head><body></body></html>')
-        soup.head.append(self.title)
+        soup = BeautifulSoup('<html><head><title></title></head><body></body></html>')
+        soup.head.title.append(self.title)
         for chapter in self.chapters:
             soup.body.append(chapter.ToHtml(soup))
         return soup
@@ -462,7 +462,8 @@ class FFNetMunger:
         c = pycurl.Curl()
         c.setopt(pycurl.USERAGENT,
                 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
-        c.setopt(pycurl.URL, TARGET % (self.story_id, chapter))
+        c.setopt(pycurl.URL,
+                'https://www.fanfiction.net/s/%s/%s' % (self.story_id, chapter))
         c.setopt(pycurl.WRITEFUNCTION, buf.write)
         c.setopt(pycurl.FOLLOWLOCATION, 1)
         c.perform()
