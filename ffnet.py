@@ -11,7 +11,7 @@ import re
 import string
 import sys
 
-from BeautifulSoup import BeautifulSoup
+from BeautifulSoup import *
 from StringIO import StringIO
 
 class PortkeyAdapter:
@@ -62,6 +62,9 @@ class PortkeyAdapter:
         map(lambda x: x.decompose(), outer_td.findAll('noscript'))
         map(lambda x: x.decompose(), outer_td.findAll('img'))
         map(lambda x: x.decompose(), outer_td.findAll('a', href=PortkeyAdapter.ReportRegex))
+        for center in outer_td.findAll('center'):
+            if not center.string:
+                center.decompose()
         return outer_td
 
     def ChapterCount(self, page_soup):
@@ -80,11 +83,14 @@ class PortkeyAdapter:
     def ChapterUrl(self, story_url, chapter):
         return story_url + unicode(chapter)
 
-    def Encoding(self):
+    def Encoding(self, chapter_contents_bytes):
         # The site doesn't explicitly say what encoding it uses. Some stories are detected as UTF-8
         # and some as ISO-8859-1. My test case had encoding issues with the latter, despite firefox
         # saying that that was the encoding it used, but windows-1252 worked.
         # Portkey, fix your encodings! I don't care what you use as long as it's consistent.
+        if chr(0x94) in chapter_contents_bytes:
+            print 'iso 8859'
+            return 'iso-8859-1'
         return 'windows-1252'
 
 
@@ -142,7 +148,7 @@ class FFNetAdapter:
     def ChapterUrl(self, story_url, chapter):
         return story_url + unicode(chapter)
 
-    def Encoding(self):
+    def Encoding(self, chapter_contents_bytes):
         return 'utf8'
 
 
@@ -355,7 +361,7 @@ class Munger:
         c.perform()
         raw_content = buf.getvalue()
         buf.close()
-        text = codecs.decode(raw_content, self.adapter.Encoding())
+        text = UnicodeDammit(raw_content, smartQuotesTo="html").unicode
         return BeautifulSoup(text)
 
 
