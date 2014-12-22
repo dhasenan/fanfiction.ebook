@@ -83,16 +83,6 @@ class PortkeyAdapter:
     def ChapterUrl(self, story_url, chapter):
         return story_url + unicode(chapter)
 
-    def Encoding(self, chapter_contents_bytes):
-        # The site doesn't explicitly say what encoding it uses. Some stories are detected as UTF-8
-        # and some as ISO-8859-1. My test case had encoding issues with the latter, despite firefox
-        # saying that that was the encoding it used, but windows-1252 worked.
-        # Portkey, fix your encodings! I don't care what you use as long as it's consistent.
-        if chr(0x94) in chapter_contents_bytes:
-            print 'iso 8859'
-            return 'iso-8859-1'
-        return 'windows-1252'
-
 
 class FFNetAdapter:
     UrlRegex = re.compile('fanfiction\.net/s/([0-9]+)(?:$|/.*)')
@@ -147,9 +137,6 @@ class FFNetAdapter:
 
     def ChapterUrl(self, story_url, chapter):
         return story_url + unicode(chapter)
-
-    def Encoding(self, chapter_contents_bytes):
-        return 'utf8'
 
 
 class ParagraphCleaner:
@@ -230,16 +217,17 @@ class Story:
             print('Unexpected author type %s' % type(self.author))
         self.chapters = chapters
         self.cover = None
+        self.filename = None
 
     def Filename(self, ext):
-        if type(self.title) != unicode:
-            print('Unexpected title type %s' % type(self.title))
-        base = self.title.replace(':', '_').replace('?', '_')
-        if type(base) != unicode:
-            print('Unexpected title type %s' % type(base))
-        name = '%s.%s' % (self.title.replace(':', '_').replace('?', '_'), ext)
-        print name
-        return name
+        if not self.filename:
+            if type(self.title) != unicode:
+                print('Unexpected title type %s' % type(self.title))
+            base = self.title.replace(':', '_').replace('?', '_')
+            if type(base) != unicode:
+                print('Unexpected title type %s' % type(base))
+            self.filename = self.title.replace(':', '_').replace('?', '_')
+        return '%s.%s' % (self.filename, ext)
 
     def ToHtml(self):
         soup = BeautifulSoup('<html><head><title></title></head><body></body></html>')
@@ -364,217 +352,6 @@ class Munger:
         text = UnicodeDammit(raw_content, smartQuotesTo="html").unicode
         return BeautifulSoup(text)
 
-
-class FFNetMunger:
-    def __init__(
-            self,
-            story_id,
-            marker=None,
-            formats=["epub", "mobi"],
-            clean=False,
-            mote_it_not=True,
-            pretty=True,
-            afternote=None):
-        try:
-            self.story_id = int(story_id)
-        except:
-            match = re.search(URLFORMAT, story_id)
-            if match:
-                self.story_id = int(match.group(1))
-            else:
-                raise ValueError("story id should be either a URL or a story id")
-        self.marker = marker
-        self.clean_html = clean
-        self.formats = formats
-        self.mote_it_not = mote_it_not
-        self.pretty = pretty
-        self.afternote = afternote
-
-        self.div_re = re.compile('<div.*?</div>', re.DOTALL)
-        self.min_chapters = 0
-        self.filename = None
-        self.author = None
-        self.cover = None
-
-    def process(self):
-        self.content, self.name = self.retrieve()
-        if self.filename is None or self.filename is "":
-            self.filename = self.name
-        self.write()
-        self.convert()
-        self.clean()
-
-    def find_count(self, c):
-        count = 0
-        regex = re.compile("SELECT[^>]*title=['\"]chapter navigation['\"]", re.I)
-        if len(regex.split(c)) == 1:
-            count = 1
-        else:
-            kernel = regex.split(c)[-1]
-            kernel, a, b = kernel.partition("</select>")
-            f = re.compile("option\\s*value=\"{0,1}([0-9]*)")
-            for match in f.finditer(kernel):
-                g, = match.groups(1)
-                current = int(g)
-                if count < current:
-                    count = current
-        print "total of %s chapters" % count
-        return count
-
-
-    def guts(self, c):
-        kernel = re.split("<div[^>]*class='storytext\\b.*?>", c, 1)[1]
-        while True:
-            kernel, n = self.div_re.subn('', kernel)
-            if n == 0:
-                break
-        kernel, a, b = kernel.partition("</div>")
-        if self.mote_it_not:
-            return (kernel
-                    .replace('o mote it be', 'o be it')
-                    .replace('o Mote It Be', 'o Be It')
-                    .replace('O MOTE IT BE', 'O BE IT')
-                    )
-        else:
-            return kernel
-
-    def get_author(self, chapter):
-        a, b, kernel = chapter.partition(" href='/u")
-        kernel, a, b = kernel.partition("</a>")
-        a, b, kernel = kernel.partition(">")
-        return kernel.strip()
-
-    def get_name(self, chapter, count):
-        a, b, kernel = chapter.partition("<title>")
-        if count > 1:
-            kernel, a, b = kernel.partition("Chapter")
-        else:
-            kernel, a, b = kernel.partition("</title>")
-            kernel, a, b = kernel.rpartition("| FanFiction")
-            kernel, a, b = kernel.rpartition(", a ")
-        return kernel.strip()
-
-    def title(self, c):
-        a, b, kernel = c.partition("<title>")
-        kernel, a, b = kernel.partition("</title>")
-        a, b, kernel = kernel.partition("Chapter ")
-        kernel, a, b = kernel.rpartition(",")
-        return "Chapter " + kernel # calibre needs 'chapter' to help its chapter detection
-
-    def download(self, chapter):
-        print "retrieving chapter %s" % chapter
-        # TODO this doesn't like non-ascii characters
-        buf = io.BytesIO()
-        c = pycurl.Curl()
-        c.setopt(pycurl.USERAGENT,
-                'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:8.0) Gecko/20100101 Firefox/8.0')
-        c.setopt(pycurl.URL,
-                'https://www.fanfiction.net/s/%s/%s' % (self.story_id, chapter))
-        c.setopt(pycurl.WRITEFUNCTION, buf.write)
-        c.setopt(pycurl.FOLLOWLOCATION, 1)
-        c.perform()
-        raw_content = buf.getvalue()
-        buf.close()
-        return codecs.decode(raw_content, 'utf8')
-
-    def wrong_story(self, c):
-        if self.marker is None:
-            return False
-        a, b, kernel = c.partition("<title>")
-        kernel, a, b = kernel.partition("</title>")
-        return string.find(kernel, self.marker) == -1
-
-    def retrieve(self):
-        chapters = []
-        titles = []
-
-        first = self.download(1)
-        count = self.find_count(first)
-        if count < self.min_chapters:
-            raise Exception('Expected at least %s chapters, only found %s' % (self.min_chapters, count))
-        name = self.get_name(first, count)
-        if not self.author:
-            self.author = self.get_author(first)
-        chapters.append(first)
-        titles.append('')
-
-        # grab the items:
-        for i in range(2, count + 1):
-            chapters.append(self.download(i))
-            titles.append('')
-
-
-        # extract the essential bits from each chapter:
-        for i in range(len(chapters)):
-            print "munging chapter %s" % (i + 1)
-            c = chapters[i]
-            if self.wrong_story(c):
-                sys.stderr.write("chapter %d came from wrong fic" % i)
-                chapters[i] = self.download(i)
-            chapters[i] = self.clean_chapter(self.guts(c))
-            titles[i] = self.title(c)
-            print titles[i]
-
-        # jam it into one string, with appropriate header and footer:
-        contents = StringIO()
-        contents.write(u"""<html>
-        <head>
-            <title>%s</title>
-        </head>
-        <body>
-    """ % name)
-        for i in range(len(chapters)):
-            contents.write(
-                u"<h1 class='chapter'>%s</h1>\n<div>%s</div>\n" % (titles[i], chapters[i]))
-
-        if self.afternote:
-            contents.write(u'<div>')
-            contents.write(unicode(self.afternote))
-            contents.write(u'</div>')
-        contents.write(u"</body></html>")
-
-        return contents, name
-
-    def clean_chapter(self, chapter_contents):
-      if not self.pretty:
-        return chapter_contents
-      soup = BeautifulSoup(chapter_contents)
-      for p in soup.findAll('p'):
-        self.clean_paragraph(p)
-      s = unicode(soup)
-      return s
-
-    def clean_paragraph(self, p):
-        ParagraphCleaner().clean(p)
-
-    def write(self):
-        self.write_to(self.filename)
-        now = datetime.datetime.now()
-        date = now.strftime("%Y-%m-%d")
-        if not self.clean:
-            self.write_to("%s-%s" % (self.filename, date))
-
-    def clean(self):
-        if self.clean_html:
-            os.remove("%s.html" % self.filename)
-
-    def write_to(self, filename):
-        print 'writing story to %s.html' % filename
-        f = io.open(filename + ".html", "wb")
-        c = self.content.getvalue()
-        f.write(codecs.encode(c, 'utf8'))
-        f.flush()
-        f.close()
-
-    def args(self, outtype):
-        std_args = ["", self.filename + ".html", outtype]
-
-        if self.author != None:
-            std_args += ["--authors", self.author]
-
-        if self.cover != None:
-            std_args += ["--cover", self.cover]
-        return std_args
 
 def main():
     parser = argparse.ArgumentParser(description="Convert fanfiction.net stories to ebooks")
