@@ -10,6 +10,7 @@ import pycurl
 import re
 import string
 import sys
+import time
 
 from BeautifulSoup import *
 from StringIO import StringIO
@@ -237,7 +238,7 @@ class Story:
         return soup
 
 class Chapter:
-    def __init__(self, title, contents):
+    def __init__(self, title, contents, soup):
         """Initialize this chapter.
         
         Args:
@@ -246,6 +247,7 @@ class Chapter:
         """
         self.title = title
         self.contents = contents
+        self.soup = soup
 
     def ToHtml(self, soup):
         chapter = BeautifulSoup('<div><h1 class="chapter"></h1></div>')
@@ -263,13 +265,15 @@ class Munger:
             clean=False,
             mote_it_not=True,
             pretty=True,
-            afternote=None):
+            afternote=None,
+            filename=None):
         self.story_url = adapter.StoryUrl(story_url)
         self.adapter = adapter
         self.formats = formats
         self.clean = clean
         self.pretty = pretty
         self.afternote = afternote
+        self.filename = filename
         self.cover = None
 
         self._cleaner = ParagraphCleaner()
@@ -286,21 +290,22 @@ class Munger:
         chapter_count = self.adapter.ChapterCount(chapter1)
         chapters = [self.ToChapter(chapter1)]
         for i in range(2, chapter_count + 1):
+            time.sleep(2)
             raw = self.DownloadChapter(i)
             chapters.append(self.ToChapter(raw))
         # TODO put this into rationality.py instead -- it can deal.
         if self.afternote:
             final = chapters[-1].contents
-            after = final.new_tag('div')
-            after.append(after.new_string(afternote))
-            final.append(after)
+            after = Tag(chapters[-1].soup, 'div')
+            after.insert(0, NavigableString(self.afternote))
+            final.insert(len(final.contents), after)
         return Story(title, author, chapters)
 
 
     def ToChapter(self, raw):
         contents = self.adapter.ChapterContents(raw)
         title = self.adapter.ChapterTitle(raw)
-        chapter = Chapter(title, contents)
+        chapter = Chapter(title, contents, raw)
         self.CleanChapter(chapter)
         return chapter
 
@@ -308,7 +313,10 @@ class Munger:
     def CreateEbook(self, story):
         html = story.ToHtml()
         print 'writing story to %s.html' % story.Filename('html')
-        f = io.open(story.Filename('html'), 'w')
+        filename = self.filename or story.Filename('html')
+        if not filename.endswith(".html"):
+          filename = filename + ".html"
+        f = io.open(filename, 'w')
         f.write(unicode(html))
         f.flush()
         f.close()
@@ -316,12 +324,13 @@ class Munger:
         for outtype in self.formats:
             pid = os.fork()
             if pid == 0:
-                os.execvp('ebook-convert', self._Args(story, outtype))
+                os.execvp('ebook-convert', self._Args(story, outtype, filename))
                 return
             os.waitpid(pid, 0)
 
-    def _Args(self, story, outtype):
-        std_args = ['', story.Filename('html'), story.Filename(outtype)]
+    def _Args(self, story, outtype, filename):
+        convertedFilename = filename.replace('.html', '.' + outtype)
+        std_args = ['', filename, convertedFilename]
 
         if story.author != None:
             std_args += ['--authors', story.author]
