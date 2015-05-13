@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # coding=utf-8
 
+# TODO: image support
+
 import argparse
 import codecs
 import datetime
@@ -12,7 +14,8 @@ import string
 import sys
 import time
 
-from BeautifulSoup import *
+from bs4 import BeautifulSoup
+from bs4 import UnicodeDammit
 from StringIO import StringIO
 
 class PortkeyAdapter:
@@ -140,6 +143,44 @@ class FFNetAdapter:
         return story_url + unicode(chapter)
 
 
+class BbForumAdapter:
+    def CanHandle(self, url):
+        # TODO: examine content to see if it's a BB forum thread
+        return 'forums.spacebattles.com' in url
+
+    def StoryUrl(self, raw_url):
+        if re.match('page-[:digit:]+', raw_url.rsplit('/', 2)[1]):
+            return raw_url.rsplit('-', 2)[0]
+        if raw_url.endswith('/'):
+            return raw_url + 'page-'
+
+    def ChapterUrl(self, story_url, chapter):
+        return story_url + unicode(chapter)
+    
+    def Title(self, page_soup):
+        h1 = page_soup.find('h1')
+        return unicode(h1.contents[0])
+
+    def Author(self, page_soup):
+        return page_soup.select('li.message')[0]['data-author']
+
+    def ChapterCount(self, page_soup):
+        pagenav = page_soup.select('div.PageNav')[0]
+        if 'threadmarksSinglePage' in pagenav['class']:
+            return 1
+        return int(pagenav['data-last'])
+
+    def ChapterTitle(self, page_soup):
+        return None
+
+    def ChapterContents(self, page_soup):
+        fixup = BeautifulSoup()
+        for a in page_soup.findAll('article'):
+            fixup.append(a)
+            fixup.append(fixup.new_tag('hr'))
+        return fixup
+
+
 class ParagraphCleaner:
     def Clean(self, p):
         # Recurse through, changing quotes. Look for blockquote indicators (centered + italics).
@@ -250,10 +291,12 @@ class Chapter:
         self.soup = soup
 
     def ToHtml(self, soup):
-        chapter = BeautifulSoup('<div><h1 class="chapter"></h1></div>')
-        chapter.h1.append(self.title)
-        chapter.append(self.contents)
-        return chapter
+        if self.title:
+            chapter = BeautifulSoup('<div><h1 class="chapter"></h1></div>')
+            chapter.h1.append(self.title)
+            chapter.append(self.contents)
+            return chapter
+        return self.contents
 
 
 class Munger:
@@ -358,7 +401,7 @@ class Munger:
         c.perform()
         raw_content = buf.getvalue()
         buf.close()
-        text = UnicodeDammit(raw_content, smartQuotesTo="html").unicode
+        text = UnicodeDammit(raw_content, smart_quotes_to="html").unicode_markup
         return BeautifulSoup(text)
 
 
@@ -392,7 +435,7 @@ def main():
         sys.stderr.write("Usage: %s [story id|url]\n")
         exit(1)
 
-    adapters = [PortkeyAdapter(), FFNetAdapter()]
+    adapters = [PortkeyAdapter(), FFNetAdapter(), BbForumAdapter()]
     for story in args.stories:
         for adapter in adapters:
             if not adapter.CanHandle(story):
