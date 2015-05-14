@@ -125,7 +125,7 @@ class FFNetAdapter:
         if not select:
             return ''
         for s in select.findAll('option'):
-            for k, v in s.attrs:
+            for k, v in s.attrs.iteritems():
                 if k == 'selected':
                     return u'Chapter ' + unicode(s.string)
         return 'Missing chapter title'
