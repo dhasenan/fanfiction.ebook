@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding=utf-8
 
 # TODO: image support
@@ -16,7 +16,7 @@ import time
 
 from bs4 import BeautifulSoup
 from bs4 import UnicodeDammit
-from StringIO import StringIO
+from io import StringIO
 
 class PortkeyAdapter:
     ReportRegex = re.compile('http.*portkey.*act=report.*')
@@ -32,7 +32,7 @@ class PortkeyAdapter:
 
     def Title(self, first_page_soup):
         # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
-        title = unicode(first_page_soup.find('title').contents[0])
+        title = first_page_soup.find('title').contents[0]
         title = title.replace('PORTKEY.ORG >> ', '')
         title = title.replace('PORTKEY.ORG &gt;&gt;', '')
         title = title[0:title.rfind(' - Chapter')]
@@ -40,10 +40,10 @@ class PortkeyAdapter:
 
     def Author(self, page_soup):
         link = page_soup.find('a', href=PortkeyAdapter.AuthorProfileRegex)
-        return unicode(link.string)
+        return (link.string)
 
     def ChapterTitle(self, page_soup):
-        title = unicode(page_soup.find('title').contents[0])
+        title = (page_soup.find('title').contents[0])
         title = title[title.rfind('- Chapter:'):]
         title = title[len('- Chapter:'):]
         title = 'Chapter' + title
@@ -85,7 +85,7 @@ class PortkeyAdapter:
                     return s
 
     def ChapterUrl(self, story_url, chapter):
-        return story_url + unicode(chapter)
+        return '%s%s' % (story_url, chapter)
 
 
 class FFNetAdapter:
@@ -106,7 +106,7 @@ class FFNetAdapter:
     def Title(self, page_soup):
         # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
         chapter_title = self.ChapterTitle(page_soup)
-        title = unicode(page_soup.find('title').contents[0])
+        title = (page_soup.find('title').contents[0])
         if chapter_title and chapter_title in title:
             title = title[0:title.rfind(chapter_title)]
         else:
@@ -118,16 +118,16 @@ class FFNetAdapter:
     def Author(self, page_soup):
         top = page_soup.find('div', id='profile_top')
         link = top.find('a', href=FFNetAdapter.AuthorProfileRegex)
-        return unicode(link.string)
+        return (link.string)
 
     def ChapterTitle(self, page_soup):
         select = page_soup.find('select', id='chap_select')
         if not select:
             return ''
         for s in select.findAll('option'):
-            for k, v in s.attrs.iteritems():
+            for k, v in s.attrs.items():
                 if k == 'selected':
-                    return u'Chapter ' + unicode(s.string)
+                    return u'Chapter ' + (s.string)
         return 'Missing chapter title'
 
     def ChapterContents(self, page_soup):
@@ -140,7 +140,7 @@ class FFNetAdapter:
         return len(select.findAll('option'))
 
     def ChapterUrl(self, story_url, chapter):
-        return story_url + unicode(chapter)
+        return '%s%s' % (story_url, chapter)
 
 
 class BbForumAdapter:
@@ -155,11 +155,11 @@ class BbForumAdapter:
             return raw_url + 'page-'
 
     def ChapterUrl(self, story_url, chapter):
-        return story_url + unicode(chapter)
-    
+        return '%s%s' % (story_url, chapter)
+
     def Title(self, page_soup):
         h1 = page_soup.find('h1')
-        return unicode(h1.contents[0])
+        return (h1.contents[0])
 
     def Author(self, page_soup):
         return page_soup.select('li.message')[0]['data-author']
@@ -206,15 +206,15 @@ class ParagraphCleaner:
             # And [letter]'[letter] is always an apostrophe, which should be rendered as a right quote
             s = ''
             orig = node.string              \
-                .replace(u'--', u'&mdash;')   \
-                .replace(u'...', u'&hellip;') \
-                .replace(u'â€”', u'&mdash;')
+                .replace(u'--', u'\u2013')   \
+                .replace(u'...', u'\u2026') \
+                .replace(u'â€”', u'\u2014')
             for i in range(len(orig)):
                 c = orig[i]
                 if c == '\'':
-                    s += self.Requote(orig, i, '&lsquo;', '&rsquo;')
+                    s += self.Requote(orig, i, u'\u2018', u'\u2019')
                 elif c == '"':
-                    s += self.Requote(orig, i, '&ldquo;', '&rdquo;')
+                    s += self.Requote(orig, i, u'\u201c', u'\u201d')
                 else:
                     s += c
             node.replaceWith(s)
@@ -230,7 +230,7 @@ class ParagraphCleaner:
             return rquo
         # Quote or dropped letters.
         # The punctuation list isn't exhaustive; we're doing best effort here.
-        if left_letter or (i > 0 and orig[i - 1] in ',.!?;-:'):
+        if left_letter or (i > 0 and orig[i - 1] in ',.!?;-:\u2013\u2014'):
             if self.last_quote == sign:
                 self.quote_count -= 1
                 self.last_quote = other
@@ -252,22 +252,14 @@ class ParagraphCleaner:
 class Story:
     def __init__(self, title, author, chapters):
         self.title = title
-        if type(self.title) != unicode:
-            print('Unexpected title type %s' % type(self.title))
         self.author = author
-        if type(self.author) != unicode:
-            print('Unexpected author type %s' % type(self.author))
         self.chapters = chapters
         self.cover = None
         self.filename = None
 
     def Filename(self, ext):
         if not self.filename:
-            if type(self.title) != unicode:
-                print('Unexpected title type %s' % type(self.title))
             base = self.title.replace(':', '_').replace('?', '_')
-            if type(base) != unicode:
-                print('Unexpected title type %s' % type(base))
             self.filename = self.title.replace(':', '_').replace('?', '_')
         return '%s.%s' % (self.filename, ext)
 
@@ -309,7 +301,8 @@ class Munger:
             mote_it_not=True,
             pretty=True,
             afternote=None,
-            filename=None):
+            filename=None,
+            max_chapters=0xffffffff):
         self.story_url = adapter.StoryUrl(story_url)
         self.adapter = adapter
         self.formats = formats
@@ -318,6 +311,7 @@ class Munger:
         self.afternote = afternote
         self.filename = filename
         self.cover = None
+        self.max_chapters = max_chapters
 
         self._cleaner = ParagraphCleaner()
 
@@ -328,9 +322,11 @@ class Munger:
     def DownloadStory(self):
         chapter1 = self.DownloadChapter(1)
         title = self.adapter.Title(chapter1)
-        print title
+        print(title)
         author = self.adapter.Author(chapter1)
         chapter_count = self.adapter.ChapterCount(chapter1)
+        if chapter_count > self.max_chapters:
+            chapter_count = self.max_chapters
         chapters = [self.ToChapter(chapter1)]
         for i in range(2, chapter_count + 1):
             time.sleep(2)
@@ -355,12 +351,12 @@ class Munger:
 
     def CreateEbook(self, story):
         html = story.ToHtml()
-        print 'writing story to %s.html' % story.Filename('html')
+        print('writing story to %s.html' % story.Filename('html'))
         filename = self.filename or story.Filename('html')
         if not filename.endswith(".html"):
           filename = filename + ".html"
         f = io.open(filename, 'w')
-        f.write(unicode(html))
+        f.write(str(html))
         f.flush()
         f.close()
 
@@ -370,6 +366,8 @@ class Munger:
                 os.execvp('ebook-convert', self._Args(story, outtype, filename))
                 return
             os.waitpid(pid, 0)
+        if self.clean:
+            os.remove(filename)
 
     def _Args(self, story, outtype, filename):
         convertedFilename = filename.replace('.html', '.' + outtype)
@@ -389,7 +387,7 @@ class Munger:
             self._cleaner.Clean(p)
 
     def DownloadChapter(self, chapter):
-        print 'retrieving chapter %s' % chapter
+        print('retrieving chapter %s' % chapter)
         url = self.adapter.ChapterUrl(self.story_url, chapter)
         buf = io.BytesIO()
         c = pycurl.Curl()
@@ -421,6 +419,8 @@ def main():
             help="don't prettify text (curly quotes, nicer blockquotes, etc as in original)")
     parser.add_argument("--somoteitbe", "-s", dest="somoteitbe", action="store_true",
             help="allow an egregiously overused and terrible phrase to be used")
+    parser.add_argument("--max-chapters", "-M", dest="max_chapters", nargs=1, type=int,
+            default=[0xffffffff], help="limit the number of chapters processed (mostly for debug)")
     args = parser.parse_args()
     formats = ["mobi", "epub"]
     if args.formats:
@@ -446,7 +446,8 @@ def main():
                     formats=formats,
                     clean=args.clean,
                     mote_it_not=not args.somoteitbe,
-                    pretty=not args.raw)
+                    pretty=not args.raw,
+                    max_chapters=args.max_chapters[0])
             munger.DownloadAndConvert()
 
 if __name__ == "__main__":
