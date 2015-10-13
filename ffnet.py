@@ -38,6 +38,13 @@ class PortkeyAdapter:
         title = title[0:title.rfind(' - Chapter')]
         return title.strip()
 
+    def Fandom(self, page_soup):
+        return "Harry Potter"
+
+    def Blurb(self, page_soup):
+        # TODO: get the blurb for a story
+        return ""
+
     def Author(self, page_soup):
         link = page_soup.find('a', href=PortkeyAdapter.AuthorProfileRegex)
         return (link.string)
@@ -93,7 +100,7 @@ class FFNetAdapter:
     AuthorProfileRegex = re.compile('/u/.*')
 
     def CanHandle(self, url):
-        return 'fanfiction.net/' in url
+        return 'fanfiction.net/s' in url
 
     def StoryUrl(self, raw_url):
         match = FFNetAdapter.UrlRegex.search(raw_url)
@@ -105,15 +112,14 @@ class FFNetAdapter:
 
     def Title(self, page_soup):
         # PORTKEYORG >> Foobar and the Rackinfrats - Chapter 1
-        chapter_title = self.ChapterTitle(page_soup)
-        title = (page_soup.find('title').contents[0])
-        if chapter_title and chapter_title in title:
-            title = title[0:title.rfind(chapter_title)]
-        else:
-            title = title[0:title.rfind(',')]
-            title = title[0:title.rfind('Chapter')]
-        title = title[0:title.rfind('|')].strip()
-        return title.strip()
+        return page_soup.select('b.xcontrast_txt')[0].contents[0].strip()
+
+    def Fandom(self, page_soup):
+        links = page_soup.select('#pre_story_links a.xcontrast_txt')
+        return links[1].contents[0].strip()
+
+    def Blurb(self, page_soup):
+        return page_soup.select('#profile_top div.xcontrast_txt')[0].contents[0]
 
     def Author(self, page_soup):
         top = page_soup.find('div', id='profile_top')
@@ -153,6 +159,7 @@ class BbForumAdapter:
             return raw_url.rsplit('-', 2)[0]
         if raw_url.endswith('/'):
             return raw_url + 'page-'
+        return raw_url  # and hope
 
     def ChapterUrl(self, story_url, chapter):
         return '%s%s' % (story_url, chapter)
@@ -160,6 +167,12 @@ class BbForumAdapter:
     def Title(self, page_soup):
         h1 = page_soup.find('h1')
         return (h1.contents[0])
+
+    def Fandom(self, page_soup):
+        return ""
+
+    def Blurb(self, page_soup):
+        return ""
 
     def Author(self, page_soup):
         return page_soup.select('li.message')[0]['data-author']
@@ -179,6 +192,55 @@ class BbForumAdapter:
             fixup.append(a)
             fixup.append(fixup.new_tag('hr'))
         return fixup
+
+
+class FictionHuntAdapter:
+    def CanHandle(self, url):
+        # TODO: examine content to see if it's a BB forum thread
+        return 'fictionhunt.com' in url
+
+    def StoryUrl(self, raw_url):
+        if re.match('http://fictionhunt.com/read/[0-9]+/[0-9]+', raw_url):
+            return raw_url[:raw_url.rfind('/')]
+        if raw_url.endswith('/'):
+            return raw_url[:-1]
+        return raw_url
+
+    def ChapterUrl(self, story_url, chapter):
+        return '%s/%s' % (story_url, chapter)
+
+    def Title(self, page_soup):
+        return page_soup.select('div.title')[0].contents[0]
+
+    def Author(self, page_soup):
+        for a in page_soup.find_all('a'):
+            href = a['href']
+            if href == None:
+                continue
+            if 'fanfiction.net/u/' in href:
+                return a.contents[0]
+        return 'Unknown'
+
+    def ChapterCount(self, page_soup):
+        maxc = 1
+        for a in page_soup.find_all('a'):
+            href = a['href']
+            if href == None:
+                continue
+            if 'http://fictionhunt.com/read/7316864/' in href:
+                try:
+                    c = int(a.contents[0])
+                except ValueError:
+                    pass
+                if c > maxc:
+                    maxc = c
+        return maxc
+
+    def ChapterTitle(self, page_soup):
+        return None
+
+    def ChapterContents(self, page_soup):
+        return page_soup.select("div.text")[0]
 
 
 class ParagraphCleaner:
@@ -250,10 +312,13 @@ class ParagraphCleaner:
             return lquo
 
 class Story:
-    def __init__(self, title, author, chapters):
+    def __init__(self, url, title, author, fandom, blurb, chapters):
+        self.url = url
         self.title = title
         self.author = author
         self.chapters = chapters
+        self.fandom = fandom
+        self.blurb = blurb
         self.cover = None
         self.filename = None
 
@@ -264,8 +329,10 @@ class Story:
         return '%s.%s' % (self.filename, ext)
 
     def ToHtml(self):
-        soup = BeautifulSoup('<html><head><title></title></head><body></body></html>')
+        soup = BeautifulSoup('<html><head><title></title></head><body><a id="source"></a><div id="blurb"></div></body></html>')
         soup.head.title.append(self.title)
+        soup.body.a.href = self.url
+        soup.body.div.append(self.blurb)
         for chapter in self.chapters:
             soup.body.append(chapter.ToHtml(soup))
         return soup
@@ -284,7 +351,8 @@ class Chapter:
 
     def ToHtml(self, soup):
         if self.title:
-            chapter = BeautifulSoup('<div><h1 class="chapter"></h1></div>')
+            inner = BeautifulSoup('<div id="main"><h1 class="chapter"></h1></div>')
+            chapter = inner.select('#main')[0]
             chapter.h1.append(self.title)
             chapter.append(self.contents)
             return chapter
@@ -321,7 +389,9 @@ class Munger:
 
     def DownloadStory(self):
         chapter1 = self.DownloadChapter(1)
-        title = self.adapter.Title(chapter1)
+        title = self.adapter.Title(chapter1).strip()
+        blurb = self.adapter.Blurb(chapter1).strip()
+        fandom = self.adapter.Fandom(chapter1).strip()
         print(title)
         author = self.adapter.Author(chapter1)
         chapter_count = self.adapter.ChapterCount(chapter1)
@@ -338,7 +408,7 @@ class Munger:
             after = Tag(chapters[-1].soup, 'div')
             after.insert(0, NavigableString(self.afternote))
             final.insert(len(final.contents), after)
-        return Story(title, author, chapters)
+        return Story(self.story_url, title, author, fandom, blurb, chapters)
 
 
     def ToChapter(self, raw):
@@ -351,8 +421,8 @@ class Munger:
 
     def CreateEbook(self, story):
         html = story.ToHtml()
-        print('writing story to %s.html' % story.Filename('html'))
         filename = self.filename or story.Filename('html')
+        print('writing story to %s' % filename)
         if not filename.endswith(".html"):
           filename = filename + ".html"
         f = io.open(filename, 'w')
@@ -403,6 +473,14 @@ class Munger:
         return BeautifulSoup(text)
 
 
+all_adapters = [PortkeyAdapter(), FFNetAdapter(), BbForumAdapter(), FictionHuntAdapter()]
+
+def FindAdapter(url):
+  for adapter in all_adapters:
+    if adapter.CanHandle(url):
+      return adapter
+  return None
+
 def main():
     parser = argparse.ArgumentParser(description="Convert fanfiction.net stories to ebooks")
     parser.add_argument("stories", help="links or story ids for stories to convert", nargs="+",
@@ -421,6 +499,8 @@ def main():
             help="allow an egregiously overused and terrible phrase to be used")
     parser.add_argument("--max-chapters", "-M", dest="max_chapters", nargs=1, type=int,
             default=[0xffffffff], help="limit the number of chapters processed (mostly for debug)")
+    parser.add_argument("--series-name", "-S", dest="series_name", nargs=1, type=str,
+            help="Download stories as a series and put into one file with the given name")
     args = parser.parse_args()
     formats = ["mobi", "epub"]
     if args.formats:
@@ -431,23 +511,33 @@ def main():
         formats = ["epub"]
     elif args.mobi:
         formats = ["mobi"]
-    if not args.stories:
-        sys.stderr.write("Usage: %s [story id|url]\n")
-        exit(1)
 
-    adapters = [PortkeyAdapter(), FFNetAdapter(), BbForumAdapter()]
-    for story in args.stories:
-        for adapter in adapters:
-            if not adapter.CanHandle(story):
-                continue
-            munger = Munger(
-                    story,
-                    adapter,
-                    formats=formats,
-                    clean=args.clean,
-                    mote_it_not=not args.somoteitbe,
-                    pretty=not args.raw,
-                    max_chapters=args.max_chapters[0])
+    adapters = []
+    series = None
+    for url in args.stories:
+        adapter = FindAdapter(url)
+        if adapter == None:
+            print('Sorry, link %s doesn\'t belong to any service I can process.' % url)
+        munger = Munger(
+                url,
+                adapter,
+                formats=formats,
+                clean=args.clean,
+                mote_it_not=not args.somoteitbe,
+                pretty=not args.raw,
+                max_chapters=args.max_chapters[0])
+        if args.series_name:
+            story = munger.DownloadStory()
+            for chapter in story.chapters:
+                chapter.title = '%s: %s' % (story.title, chapter.title)
+            if series:
+                series.chapters += story.chapters
+            else:
+                series = story
+                series.title = args.series_name[0]
+            if url == args.stories[-1]:
+                munger.CreateEbook(series)
+        else:
             munger.DownloadAndConvert()
 
 if __name__ == "__main__":
