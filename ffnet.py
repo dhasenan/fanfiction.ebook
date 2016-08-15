@@ -116,7 +116,7 @@ class FFNetAdapter:
 
     def Fandom(self, page_soup):
         links = page_soup.select('#pre_story_links a.xcontrast_txt')
-        return links[1].contents[0].strip()
+        return links[-1].contents[0].strip()
 
     def Blurb(self, page_soup):
         return page_soup.select('#profile_top div.xcontrast_txt')[0].contents[0]
@@ -329,7 +329,7 @@ class Story:
         return '%s.%s' % (self.filename, ext)
 
     def ToHtml(self):
-        soup = BeautifulSoup('<html><head><title></title></head><body><a id="source"></a><div id="blurb"></div></body></html>')
+        soup = BeautifulSoup('<html><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"><title></title></head><body><a id="source"></a><div id="blurb"></div></body></html>')
         soup.head.title.append(self.title)
         soup.body.a.href = self.url
         soup.body.div.append(self.blurb)
@@ -399,7 +399,7 @@ class Munger:
             chapter_count = self.max_chapters
         chapters = [self.ToChapter(chapter1)]
         for i in range(2, chapter_count + 1):
-            time.sleep(2)
+            time.sleep(1.5)
             raw = self.DownloadChapter(i)
             chapters.append(self.ToChapter(raw))
         # TODO put this into rationality.py instead -- it can deal.
@@ -425,9 +425,8 @@ class Munger:
         print('writing story to %s' % filename)
         if not filename.endswith(".html"):
           filename = filename + ".html"
-        f = io.open(filename, 'w')
-        f.write(str(html))
-        f.flush()
+        f = codecs.open(filename, 'w', 'utf-8')
+        f.write(html.prettify())
         f.close()
 
         for outtype in self.formats:
