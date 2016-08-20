@@ -57,22 +57,13 @@ class PortkeyAdapter:
         return title
 
     def ChapterContents(self, page_soup):
-        outer_tds = page_soup.findAll('td')
-        outer_td = None
-        for td in outer_tds:
-            for k, v in td.attrs:
-                if k == 'class' and v == 'story':
-                    outer_td = td
-                    break
-            if outer_td:
-                break
-        if not outer_td:
-            return None
+        outer_tds = page_soup.findAll('td', 'story')
+        outer_td = outer_tds[0]
         # This contains a "report to admins" link and the show-ads javascript. We'll excise that.
-        map(lambda x: x.decompose(), outer_td.findAll('script'))
-        map(lambda x: x.decompose(), outer_td.findAll('noscript'))
-        map(lambda x: x.decompose(), outer_td.findAll('img'))
-        map(lambda x: x.decompose(), outer_td.findAll('a', href=PortkeyAdapter.ReportRegex))
+        for tag in ['script', 'noscript', 'img', 'a']:
+            for match in outer_td.findAll(tag):
+                print('decomposing tag %s' % match)
+                match.decompose()
         for center in outer_td.findAll('center'):
             if not center.string:
                 center.decompose()
@@ -81,15 +72,13 @@ class PortkeyAdapter:
     def ChapterCount(self, page_soup):
         select = self._FindChapterSelect(page_soup)
         if select:
+            print("got %s chapters" % len(select.findAll('option')))
             return len(select.findAll('option'))
         return 1
 
     def _FindChapterSelect(self, page_soup):
-        selects = page_soup.findAll('select')
-        for s in selects:
-            for k, v in s.attrs:
-                if k == 'class' and v == 'boxedsmall':
-                    return s
+        selects = page_soup.findAll('select', 'boxedsmall')
+        return selects[0]
 
     def ChapterUrl(self, story_url, chapter):
         return '%s%s' % (story_url, chapter)
